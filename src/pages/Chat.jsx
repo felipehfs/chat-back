@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import styled from 'styled-components';
 import MessageContainer from '../containers/MessageContainer';
 import ContactContainer from '../containers/ContactContainer';
-import { FaArrowAltCircleLeft } from 'react-icons/fa'
+import { FaArrowAltCircleLeft, FaUserCircle } from 'react-icons/fa'
 import Page from '../components/layout/Page';
+import { createEvent, handleUserOnlineEvent } from '../services/flyweightwebsocket';
 
 
 const Card = styled.div`
@@ -69,20 +70,86 @@ const BottomBar = styled.nav`
 `
 
 
-export default props =>  {
 
+export default props =>  {
     const [message, setMessage] = useState('');
-    const [messageList, setMessageList] = useState([])
-    const [contacts, setContacts] = useState([
-        { id: 1, name: 'Socrates', bio: 'Um filosofo muito foda'},
-        { id: 2, name: 'Luciana', bio: 'Um filosofo muito foda'},
-        { id: 3, name: 'Marcos', bio: 'Um filosofo muito foda'},
-        { id: 4, name: 'Beatriz', bio: 'Um filosofo muito foda'},
+    const [messageList, setMessageList] = useState([
     ])
+    const [contacts, setContacts] = useState([])
+
+    const websocket = useMemo(() => new WebSocket("ws://localhost:8083/chat"));
+    const user = useMemo(() => JSON.parse(localStorage.getItem('userInfo')));
+
+    useEffect(() => {
+        websocket.onopen = function(event) {
+            console.log('websocket connected');
+            const user = JSON.parse(localStorage.getItem("userInfo"));
+            const payload = createEvent(
+                'new_user_online',
+                {   
+                    id: user.id,
+                    name: user.username,
+                    avatarURL: user.avatar_url
+                },
+                websocket
+            )
+                
+            websocket.onclose = function(event) {
+                console.log('disconnected')
+            }
+            websocket.send(payload);
+        }
+
+        return () => {
+            websocket.close()
+        }
+    }, [])
+
+    useEffect(() => {
+        websocket.onmessage = function(event) {
+            const message = event.data;
+            console.log('received message', message);
+            const payload = JSON.parse(message)
+
+            if (payload.type === 'new_user_online') {
+                handleUserOnlineEvent({ user, payload}, websocket);
+
+                if (user.id !== payload.data.id) {
+                    setContacts([...contacts, payload.data]);
+                }
+            }
+
+            if (payload.type === 'user_online_received') {
+                if (user.id !== payload.data.id) {
+                    const contact = contacts.find(contact => contact.id === payload.data.id);
+                    if (!contact) {
+                        setContacts([...contacts, payload.data]);
+                    }
+                }
+            }
+
+            if (payload.type === 'global_message') {
+                console.log(payload.data) 
+                setMessageList([...messageList, payload.data])               
+            }
+
+        }
+    }, [websocket, contacts, user, messageList])
+
 
     const handleQuit = e => {
         e.preventDefault();
         props.history.push("/");
+        websocket.close()
+    }
+
+    const handleSendMessage = e => {
+        createEvent('global_message', {
+            id: Math.floor(Math.random() * 10000000),
+            message: `${user.username}: ${message}`
+        }, websocket);
+
+        setMessage('');
     }
 
     return (
@@ -94,6 +161,11 @@ export default props =>  {
                         <BottomBar>
                             <a title="Sair" onClick={handleQuit}>
                                 <FaArrowAltCircleLeft size={20}/>
+                            </a>
+                            <a 
+                                style={{ marginLeft: '10px'}}
+                                title={user.username}>
+                                <FaUserCircle size={20} />
                             </a>
                         </BottomBar>
                     </Contacts>
@@ -107,7 +179,9 @@ export default props =>  {
                                 placeholder="Digite seu texto"
                                 value={message}
                                 onChange={e => setMessage(e.target.value)} />
-                            <SendInput>Enviar</SendInput>
+                            <SendInput 
+                                onClick={handleSendMessage}>
+                            Enviar</SendInput>
                         </MessageFooter>
                     </MessageBox>
                 </Card>

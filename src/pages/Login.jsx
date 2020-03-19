@@ -59,7 +59,7 @@ const LoginPage = props => {
                 password
             });
             localStorage.clear();
-            localStorage.setItem('userInfo', response.data);
+            localStorage.setItem('userInfo', JSON.stringify(response.data));
             props.history.push('/chat');
         } catch(err) {
             console.error(err);
